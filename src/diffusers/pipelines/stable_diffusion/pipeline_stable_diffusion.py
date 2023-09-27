@@ -193,6 +193,21 @@ class StableDiffusionPipeline(DiffusionPipeline, TextualInversionLoaderMixin, Lo
         self.image_processor = VaeImageProcessor(vae_scale_factor=self.vae_scale_factor)
         self.register_to_config(requires_safety_checker=requires_safety_checker)
 
+        self.lang2encoder = None
+        self.extra_language_model = None
+    
+    def add_extra_language_embedding_models(
+            self, 
+            extra_language_model: Optional[torch.nn.Module] = None,
+            lang2encoder: Optional[torch.nn.Module] = None,
+        ):
+        """
+        Add models for extra language embedding.
+        """
+        self.extra_language_model = extra_language_model
+        self.lang2encoder = lang2encoder
+
+
     def enable_vae_slicing(self):
         r"""
         Enable sliced VAE decoding. When this option is enabled, the VAE will split the input tensor in slices to
@@ -366,6 +381,10 @@ class StableDiffusionPipeline(DiffusionPipeline, TextualInversionLoaderMixin, Lo
             prompt_embeds_dtype = prompt_embeds.dtype
 
         prompt_embeds = prompt_embeds.to(dtype=prompt_embeds_dtype, device=device)
+
+        if self.extra_language_model is not None:
+            extra_language_embeddings = self.extra_language_model(prompt)
+            prompt_embeds = self.lang2encoder(extra_language_embeddings, prompt_embeds)
 
         bs_embed, seq_len, _ = prompt_embeds.shape
         # duplicate text embeddings for each generation per prompt, using mps friendly method
