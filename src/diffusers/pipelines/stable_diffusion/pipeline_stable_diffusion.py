@@ -557,6 +557,7 @@ class StableDiffusionPipeline(DiffusionPipeline, TextualInversionLoaderMixin, Lo
         cross_attention_kwargs: Optional[Dict[str, Any]] = None,
         guidance_rescale: float = 0.0,
         clip_skip: Optional[int] = None,
+        class_labels: Optional[List[str]] = None,
     ):
         r"""
         The call function to the pipeline for generation.
@@ -669,6 +670,7 @@ class StableDiffusionPipeline(DiffusionPipeline, TextualInversionLoaderMixin, Lo
         # to avoid doing two forward passes
         if do_classifier_free_guidance:
             prompt_embeds = torch.cat([negative_prompt_embeds, prompt_embeds])
+            class_labels = torch.cat([class_labels, class_labels]) if class_labels is not None else None
 
         # 4. Prepare timesteps
         self.scheduler.set_timesteps(num_inference_steps, device=device)
@@ -705,6 +707,7 @@ class StableDiffusionPipeline(DiffusionPipeline, TextualInversionLoaderMixin, Lo
                     encoder_hidden_states=prompt_embeds,
                     cross_attention_kwargs=cross_attention_kwargs,
                     return_dict=False,
+                    class_labels=class_labels,
                 )[0]
 
                 # perform guidance
