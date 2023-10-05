@@ -13,10 +13,12 @@
 # limitations under the License.
 
 import inspect
+import math
 from typing import Any, Callable, Dict, List, Optional, Union
 
 import numpy as np
 import torch
+import einops
 from transformers import CLIPTextModel, CLIPTokenizer
 
 from ...loaders import LoraLoaderMixin, TextualInversionLoaderMixin
@@ -65,9 +67,14 @@ def tensor2vid(video: torch.Tensor, mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5]) -
     video.clamp_(0, 1)
     # prepare the final outputs
     i, c, f, h, w = video.shape
-    images = video.permute(2, 3, 0, 4, 1).reshape(
-        f, h, i * w, c
-    )  # 1st (frames, h, batch_size, w, c) 2nd (frames, h, batch_size * w, c)
+    # create a grid of videos
+    grid_h = math.ceil(math.sqrt(i))
+    grid_w = math.ceil(i / grid_h)
+    fake_videos_to_create = grid_h * grid_w - i
+    if fake_videos_to_create > 0:
+        fake_videos = torch.zeros((fake_videos_to_create, c, f, h, w), device=video.device)
+        video = torch.cat([video, fake_videos], dim=0)
+    images = einops.rearrange(video, "(gh gw) c f h w -> f (gh h) (gw w) c", gh=grid_h, gw=grid_w)
     images = images.unbind(dim=0)  # prepare a list of indvidual (consecutive frames)
     images = [(image.cpu().numpy() * 255).astype("uint8") for image in images]  # f h w c
     return images
