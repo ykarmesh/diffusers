@@ -20,6 +20,7 @@ from torch import nn
 from ..configuration_utils import ConfigMixin, register_to_config
 from ..utils import BaseOutput
 from .attention import BasicTransformerBlock
+from .embeddings import Timesteps
 from .modeling_utils import ModelMixin
 
 
@@ -83,6 +84,7 @@ class TransformerTemporalModel(ModelMixin, ConfigMixin):
 
         self.norm = torch.nn.GroupNorm(num_groups=norm_num_groups, num_channels=in_channels, eps=1e-6, affine=True)
         self.proj_in = nn.Linear(in_channels, inner_dim)
+        self.frames_position_embed = Timesteps(inner_dim, True, 0)              ## addded
 
         # 3. Define transformers blocks
         self.transformer_blocks = nn.ModuleList(
@@ -151,6 +153,12 @@ class TransformerTemporalModel(ModelMixin, ConfigMixin):
 
         hidden_states = self.proj_in(hidden_states)
 
+                                                                                                    # added as per https://github.com/huggingface/diffusers/pull/4565/files
+        frames_pos = torch.arange(num_frames).to(hidden_states)
+        frames_pos_emb = self.frames_position_embed(frames_pos)
+        frames_pos_emb = frames_pos_emb[None, ...].expand(hidden_states.shape[0], -1, -1).to(dtype=self.dtype)
+        hidden_states = hidden_states + frames_pos_emb
+        
         # 2. Blocks
         for block in self.transformer_blocks:
             hidden_states = block(

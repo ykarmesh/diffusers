@@ -34,10 +34,11 @@ def get_down_block(
     cross_attention_dim=None,
     downsample_padding=None,
     dual_cross_attention=False,
-    use_linear_projection=True,
+    use_linear_projection=False,                ## was originally true, why?
     only_cross_attention=False,
     upcast_attention=False,
     resnet_time_scale_shift="default",
+    set_non_unet_parts_off=False,
 ):
     if down_block_type == "DownBlock3D":
         return DownBlock3D(
@@ -51,6 +52,7 @@ def get_down_block(
             resnet_groups=resnet_groups,
             downsample_padding=downsample_padding,
             resnet_time_scale_shift=resnet_time_scale_shift,
+            set_non_unet_parts_off=set_non_unet_parts_off,
         )
     elif down_block_type == "CrossAttnDownBlock3D":
         if cross_attention_dim is None:
@@ -72,6 +74,7 @@ def get_down_block(
             only_cross_attention=only_cross_attention,
             upcast_attention=upcast_attention,
             resnet_time_scale_shift=resnet_time_scale_shift,
+            set_non_unet_parts_off=set_non_unet_parts_off,
         )
     raise ValueError(f"{down_block_type} does not exist.")
 
@@ -90,10 +93,11 @@ def get_up_block(
     resnet_groups=None,
     cross_attention_dim=None,
     dual_cross_attention=False,
-    use_linear_projection=True,
+    use_linear_projection=False,                    ## was false before
     only_cross_attention=False,
     upcast_attention=False,
     resnet_time_scale_shift="default",
+    set_non_unet_parts_off=False,
 ):
     if up_block_type == "UpBlock3D":
         return UpBlock3D(
@@ -107,6 +111,7 @@ def get_up_block(
             resnet_act_fn=resnet_act_fn,
             resnet_groups=resnet_groups,
             resnet_time_scale_shift=resnet_time_scale_shift,
+            set_non_unet_parts_off=set_non_unet_parts_off,
         )
     elif up_block_type == "CrossAttnUpBlock3D":
         if cross_attention_dim is None:
@@ -128,6 +133,7 @@ def get_up_block(
             only_cross_attention=only_cross_attention,
             upcast_attention=upcast_attention,
             resnet_time_scale_shift=resnet_time_scale_shift,
+            set_non_unet_parts_off=set_non_unet_parts_off,
         )
     raise ValueError(f"{up_block_type} does not exist.")
 
@@ -148,11 +154,13 @@ class UNetMidBlock3DCrossAttn(nn.Module):
         output_scale_factor=1.0,
         cross_attention_dim=1280,
         dual_cross_attention=False,
-        use_linear_projection=True,
+        use_linear_projection=False,        ## was originally true, why?
         upcast_attention=False,
+        ignore_temporal=False,
+        set_non_unet_parts_off=False,
     ):
         super().__init__()
-
+        self.set_non_unet_parts_off = set_non_unet_parts_off
         self.has_cross_attention = True
         self.num_attention_heads = num_attention_heads
         resnet_groups = resnet_groups if resnet_groups is not None else min(in_channels // 4, 32)
@@ -185,8 +193,8 @@ class UNetMidBlock3DCrossAttn(nn.Module):
         for _ in range(num_layers):
             attentions.append(
                 Transformer2DModel(
-                    in_channels // num_attention_heads,
                     num_attention_heads,
+                    in_channels // num_attention_heads,                 ## flipped these to match unet 2d case
                     in_channels=in_channels,
                     num_layers=1,
                     cross_attention_dim=cross_attention_dim,
@@ -197,8 +205,8 @@ class UNetMidBlock3DCrossAttn(nn.Module):
             )
             temp_attentions.append(
                 TransformerTemporalModel(
-                    in_channels // num_attention_heads,
                     num_attention_heads,
+                    in_channels // num_attention_heads,                             ## flipped
                     in_channels=in_channels,
                     num_layers=1,
                     cross_attention_dim=cross_attention_dim,
@@ -252,11 +260,13 @@ class UNetMidBlock3DCrossAttn(nn.Module):
                 cross_attention_kwargs=cross_attention_kwargs,
                 return_dict=False,
             )[0]
-            hidden_states = temp_attn(
-                hidden_states, num_frames=num_frames, cross_attention_kwargs=cross_attention_kwargs, return_dict=False
-            )[0]
+            if not self.set_non_unet_parts_off:
+                hidden_states = temp_attn(
+                    hidden_states, num_frames=num_frames, cross_attention_kwargs=cross_attention_kwargs, return_dict=False
+                )[0]
             hidden_states = resnet(hidden_states, temb)
-            hidden_states = temp_conv(hidden_states, num_frames=num_frames)
+            if not self.set_non_unet_parts_off:
+                hidden_states = temp_conv(hidden_states, num_frames=num_frames)
 
         return hidden_states
 
@@ -283,12 +293,14 @@ class CrossAttnDownBlock3D(nn.Module):
         use_linear_projection=False,
         only_cross_attention=False,
         upcast_attention=False,
+        set_non_unet_parts_off=False,
     ):
         super().__init__()
         resnets = []
         attentions = []
         temp_attentions = []
-        temp_convs = []
+        temp_convs = [] 
+        self.set_non_unet_parts_off = set_non_unet_parts_off
 
         self.has_cross_attention = True
         self.num_attention_heads = num_attention_heads
@@ -318,8 +330,8 @@ class CrossAttnDownBlock3D(nn.Module):
             )
             attentions.append(
                 Transformer2DModel(
+                    num_attention_heads,                                            ## flipped
                     out_channels // num_attention_heads,
-                    num_attention_heads,
                     in_channels=out_channels,
                     num_layers=1,
                     cross_attention_dim=cross_attention_dim,
@@ -331,8 +343,8 @@ class CrossAttnDownBlock3D(nn.Module):
             )
             temp_attentions.append(
                 TransformerTemporalModel(
+                    num_attention_heads,                                    ## flipped
                     out_channels // num_attention_heads,
-                    num_attention_heads,
                     in_channels=out_channels,
                     num_layers=1,
                     cross_attention_dim=cross_attention_dim,
@@ -373,16 +385,18 @@ class CrossAttnDownBlock3D(nn.Module):
             self.resnets, self.temp_convs, self.attentions, self.temp_attentions
         ):
             hidden_states = resnet(hidden_states, temb)
-            hidden_states = temp_conv(hidden_states, num_frames=num_frames)
+            if not self.set_non_unet_parts_off:
+                hidden_states = temp_conv(hidden_states, num_frames=num_frames)
             hidden_states = attn(
                 hidden_states,
                 encoder_hidden_states=encoder_hidden_states,
                 cross_attention_kwargs=cross_attention_kwargs,
                 return_dict=False,
             )[0]
-            hidden_states = temp_attn(
-                hidden_states, num_frames=num_frames, cross_attention_kwargs=cross_attention_kwargs, return_dict=False
-            )[0]
+            if not self.set_non_unet_parts_off:
+                hidden_states = temp_attn(
+                    hidden_states, num_frames=num_frames, cross_attention_kwargs=cross_attention_kwargs, return_dict=False
+                )[0]
 
             output_states += (hidden_states,)
 
@@ -411,11 +425,13 @@ class DownBlock3D(nn.Module):
         output_scale_factor=1.0,
         add_downsample=True,
         downsample_padding=1,
+        set_non_unet_parts_off=False,
     ):
         super().__init__()
         resnets = []
         temp_convs = []
 
+        self.set_non_unet_parts_off = set_non_unet_parts_off
         for i in range(num_layers):
             in_channels = in_channels if i == 0 else out_channels
             resnets.append(
@@ -461,7 +477,8 @@ class DownBlock3D(nn.Module):
 
         for resnet, temp_conv in zip(self.resnets, self.temp_convs):
             hidden_states = resnet(hidden_states, temb)
-            hidden_states = temp_conv(hidden_states, num_frames=num_frames)
+            if not self.set_non_unet_parts_off:
+                hidden_states = temp_conv(hidden_states, num_frames=num_frames)
 
             output_states += (hidden_states,)
 
@@ -496,6 +513,7 @@ class CrossAttnUpBlock3D(nn.Module):
         use_linear_projection=False,
         only_cross_attention=False,
         upcast_attention=False,
+        set_non_unet_parts_off=False,
     ):
         super().__init__()
         resnets = []
@@ -503,6 +521,7 @@ class CrossAttnUpBlock3D(nn.Module):
         attentions = []
         temp_attentions = []
 
+        self.set_non_unet_parts_off = set_non_unet_parts_off
         self.has_cross_attention = True
         self.num_attention_heads = num_attention_heads
 
@@ -533,8 +552,8 @@ class CrossAttnUpBlock3D(nn.Module):
             )
             attentions.append(
                 Transformer2DModel(
-                    out_channels // num_attention_heads,
                     num_attention_heads,
+                    out_channels // num_attention_heads,                            ## flipped
                     in_channels=out_channels,
                     num_layers=1,
                     cross_attention_dim=cross_attention_dim,
@@ -546,8 +565,8 @@ class CrossAttnUpBlock3D(nn.Module):
             )
             temp_attentions.append(
                 TransformerTemporalModel(
+                    num_attention_heads,                                ## flipped                      
                     out_channels // num_attention_heads,
-                    num_attention_heads,
                     in_channels=out_channels,
                     num_layers=1,
                     cross_attention_dim=cross_attention_dim,
@@ -587,16 +606,18 @@ class CrossAttnUpBlock3D(nn.Module):
             hidden_states = torch.cat([hidden_states, res_hidden_states], dim=1)
 
             hidden_states = resnet(hidden_states, temb)
-            hidden_states = temp_conv(hidden_states, num_frames=num_frames)
+            if not self.set_non_unet_parts_off:
+                hidden_states = temp_conv(hidden_states, num_frames=num_frames)
             hidden_states = attn(
                 hidden_states,
                 encoder_hidden_states=encoder_hidden_states,
                 cross_attention_kwargs=cross_attention_kwargs,
                 return_dict=False,
             )[0]
-            hidden_states = temp_attn(
-                hidden_states, num_frames=num_frames, cross_attention_kwargs=cross_attention_kwargs, return_dict=False
-            )[0]
+            if not self.set_non_unet_parts_off:
+                hidden_states = temp_attn(
+                    hidden_states, num_frames=num_frames, cross_attention_kwargs=cross_attention_kwargs, return_dict=False
+                )[0]
 
         if self.upsamplers is not None:
             for upsampler in self.upsamplers:
@@ -621,11 +642,13 @@ class UpBlock3D(nn.Module):
         resnet_pre_norm: bool = True,
         output_scale_factor=1.0,
         add_upsample=True,
+        set_non_unet_parts_off=False,
     ):
         super().__init__()
         resnets = []
         temp_convs = []
 
+        self.set_non_unet_parts_off = set_non_unet_parts_off
         for i in range(num_layers):
             res_skip_channels = in_channels if (i == num_layers - 1) else out_channels
             resnet_in_channels = prev_output_channel if i == 0 else out_channels
@@ -670,7 +693,8 @@ class UpBlock3D(nn.Module):
             hidden_states = torch.cat([hidden_states, res_hidden_states], dim=1)
 
             hidden_states = resnet(hidden_states, temb)
-            hidden_states = temp_conv(hidden_states, num_frames=num_frames)
+            if not self.set_non_unet_parts_off:
+                hidden_states = temp_conv(hidden_states, num_frames=num_frames)
 
         if self.upsamplers is not None:
             for upsampler in self.upsamplers:

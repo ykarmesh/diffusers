@@ -953,6 +953,7 @@ class UNet2DConditionModel(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin)
                 if is_adapter and len(down_block_additional_residuals) > 0:
                     additional_residuals["additional_residuals"] = down_block_additional_residuals.pop(0)
 
+
                 sample, res_samples = downsample_block(
                     hidden_states=sample,
                     temb=emb,

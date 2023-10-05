@@ -115,10 +115,12 @@ class UNet3DConditionModel(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin)
         cross_attention_dim: int = 1024,
         attention_head_dim: Union[int, Tuple[int]] = 64,
         num_attention_heads: Optional[Union[int, Tuple[int]]] = None,
+        set_non_unet_parts_off: bool = False,
     ):
         super().__init__()
 
         self.sample_size = sample_size
+        self.set_non_unet_parts_off = set_non_unet_parts_off
 
         if num_attention_heads is not None:
             raise NotImplementedError(
@@ -203,6 +205,7 @@ class UNet3DConditionModel(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin)
                 num_attention_heads=num_attention_heads[i],
                 downsample_padding=downsample_padding,
                 dual_cross_attention=False,
+                set_non_unet_parts_off=set_non_unet_parts_off,
             )
             self.down_blocks.append(down_block)
 
@@ -217,6 +220,7 @@ class UNet3DConditionModel(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin)
             num_attention_heads=num_attention_heads[-1],
             resnet_groups=norm_num_groups,
             dual_cross_attention=False,
+            set_non_unet_parts_off=set_non_unet_parts_off,
         )
 
         # count how many layers upsample the images
@@ -255,6 +259,7 @@ class UNet3DConditionModel(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin)
                 cross_attention_dim=cross_attention_dim,
                 num_attention_heads=reversed_num_attention_heads[i],
                 dual_cross_attention=False,
+                set_non_unet_parts_off=set_non_unet_parts_off,
             )
             self.up_blocks.append(up_block)
             prev_output_channel = output_channel
@@ -497,6 +502,7 @@ class UNet3DConditionModel(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin)
         # The overall upsampling factor is equal to 2 ** (# num of upsampling layears).
         # However, the upsampling interpolation output size can be forced to fit any upsampling size
         # on the fly if necessary.
+        
         default_overall_up_factor = 2**self.num_upsamplers
 
         # upsample size should be forwarded when sample is not a multiple of `default_overall_up_factor`
@@ -545,17 +551,20 @@ class UNet3DConditionModel(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin)
         sample = sample.permute(0, 2, 1, 3, 4).reshape((sample.shape[0] * num_frames, -1) + sample.shape[3:])
         sample = self.conv_in(sample)
 
-        sample = self.transformer_in(
-            sample,
-            num_frames=num_frames,
-            cross_attention_kwargs=cross_attention_kwargs,
-            return_dict=False,
-        )[0]
+        if not self.set_non_unet_parts_off:
+            sample = self.transformer_in(
+                sample,
+                num_frames=num_frames,
+                cross_attention_kwargs=cross_attention_kwargs,
+                return_dict=False,
+            )[0]
 
         # 3. down
         down_block_res_samples = (sample,)
         for downsample_block in self.down_blocks:
             if hasattr(downsample_block, "has_cross_attention") and downsample_block.has_cross_attention:
+                # import ipdb
+                # ipdb.set_trace()
                 sample, res_samples = downsample_block(
                     hidden_states=sample,
                     temb=emb,
