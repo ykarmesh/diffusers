@@ -498,6 +498,8 @@ class TextToVideoSDPipeline(DiffusionPipeline, TextualInversionLoaderMixin, Lora
         callback_steps: int = 1,
         cross_attention_kwargs: Optional[Dict[str, Any]] = None,
         clip_skip: Optional[int] = None,
+        supply_init_frame: bool = False,
+        init_frame: Optional[torch.FloatTensor] = None,
     ):
         r"""
         The call function to the pipeline for generation.
@@ -639,6 +641,11 @@ class TextToVideoSDPipeline(DiffusionPipeline, TextualInversionLoaderMixin, Lora
                 latent_model_input = torch.cat([latents] * 2) if do_classifier_free_guidance else latents
                 latent_model_input = self.scheduler.scale_model_input(latent_model_input, t)
 
+                if supply_init_frame:
+                    encoded_init_frame = self.vae.encode(init_frame.to(self.vae.device)).latent_dist.mode().unsqueeze(2)
+                    encoded_init_frame = torch.cat([encoded_init_frame] * 2) if do_classifier_free_guidance else encoded_init_frame
+                    latent_model_input = torch.cat([encoded_init_frame, latent_model_input], dim=2)
+
                 # predict the noise residual
                 noise_pred = self.unet(
                     latent_model_input,
@@ -647,6 +654,9 @@ class TextToVideoSDPipeline(DiffusionPipeline, TextualInversionLoaderMixin, Lora
                     cross_attention_kwargs=cross_attention_kwargs,
                     return_dict=False,
                 )[0]
+                
+                if supply_init_frame:
+                    noise_pred = noise_pred[:, :, 1:]
 
                 # perform guidance
                 if do_classifier_free_guidance:
