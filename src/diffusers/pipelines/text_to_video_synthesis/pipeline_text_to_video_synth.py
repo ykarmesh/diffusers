@@ -617,7 +617,7 @@ class TextToVideoSDPipeline(DiffusionPipeline, TextualInversionLoaderMixin, Lora
         timesteps = self.scheduler.timesteps
 
         # 5. Prepare latent variables
-        num_channels_latents = self.unet.config.in_channels
+        num_channels_latents = self.unet.config.in_channels if supply_init_frame else self.unet.config.in_channels//2
         latents = self.prepare_latents(
             batch_size * num_images_per_prompt,
             num_channels_latents,
@@ -645,6 +645,12 @@ class TextToVideoSDPipeline(DiffusionPipeline, TextualInversionLoaderMixin, Lora
                     encoded_init_frame = self.vae.encode(init_frame.to(self.vae.device)).latent_dist.mode().unsqueeze(2)
                     encoded_init_frame = torch.cat([encoded_init_frame] * 2) if do_classifier_free_guidance else encoded_init_frame
                     latent_model_input = torch.cat([encoded_init_frame, latent_model_input], dim=2)
+                else:
+                    # concat encoded_init_frame with latents across channel dimension
+                    encoded_init_frame = self.vae.encode(init_frame.to(self.vae.device)).latent_dist.mode().unsqueeze(2)
+                    encoded_init_frame = encoded_init_frame.repeat(1, 1, latent_model_input.shape[2], 1, 1)
+                    encoded_init_frame = torch.cat([encoded_init_frame] * 2) if do_classifier_free_guidance else encoded_init_frame
+                    latent_model_input = torch.cat([encoded_init_frame, latent_model_input], dim=1)
 
                 # predict the noise residual
                 noise_pred = self.unet(
@@ -666,7 +672,8 @@ class TextToVideoSDPipeline(DiffusionPipeline, TextualInversionLoaderMixin, Lora
                 # reshape latents
                 bsz, channel, frames, width, height = latents.shape
                 latents = latents.permute(0, 2, 1, 3, 4).reshape(bsz * frames, channel, width, height)
-                noise_pred = noise_pred.permute(0, 2, 1, 3, 4).reshape(bsz * frames, channel, width, height)
+                bsz_np, channel_np, frames_np, width_np, height_np = noise_pred.shape                
+                noise_pred = noise_pred.permute(0, 2, 1, 3, 4).reshape(bsz_np * frames_np, channel_np, width_np, height_np)
 
                 # compute the previous noisy sample x_t -> x_t-1
                 latents = self.scheduler.step(noise_pred, t, latents, **extra_step_kwargs).prev_sample
