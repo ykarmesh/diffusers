@@ -642,12 +642,12 @@ class TextToVideoSDPipeline(DiffusionPipeline, TextualInversionLoaderMixin, Lora
                 latent_model_input = self.scheduler.scale_model_input(latent_model_input, t)
 
                 if concat_image_cond_like == "temporal":
-                    encoded_init_frame = self.vae.encode(init_frame.to(self.vae.device)).latent_dist.mode().unsqueeze(2)
+                    encoded_init_frame = self.vae.encode(init_frame.to(self.vae.device)).latent_dist.mode().unsqueeze(2) * 0.18215
                     encoded_init_frame = torch.cat([encoded_init_frame] * 2) if do_classifier_free_guidance else encoded_init_frame
                     latent_model_input = torch.cat([encoded_init_frame, latent_model_input], dim=2)
                 elif concat_image_cond_like == "hip":
                     # concat encoded_init_frame with latents across channel dimension
-                    encoded_init_frame = self.vae.encode(init_frame.to(self.vae.device)).latent_dist.mode().unsqueeze(2)
+                    encoded_init_frame = self.vae.encode(init_frame.to(self.vae.device)).latent_dist.mode().unsqueeze(2) * 0.18215
                     encoded_init_frame = encoded_init_frame.repeat(1, 1, latent_model_input.shape[2], 1, 1)
                     encoded_init_frame = torch.cat([encoded_init_frame] * 2) if do_classifier_free_guidance else encoded_init_frame
                     latent_model_input = torch.cat([encoded_init_frame, latent_model_input], dim=1)
