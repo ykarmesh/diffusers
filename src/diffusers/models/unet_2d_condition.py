@@ -745,6 +745,7 @@ class UNet2DConditionModel(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin)
         mid_block_additional_residual: Optional[torch.Tensor] = None,
         encoder_attention_mask: Optional[torch.Tensor] = None,
         return_dict: bool = True,
+        get_mid_block_representations: bool = False,
     ) -> Union[UNet2DConditionOutput, Tuple]:
         r"""
         The [`UNet2DConditionModel`] forward method.
@@ -1002,6 +1003,9 @@ class UNet2DConditionModel(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin)
         if is_controlnet:
             sample = sample + mid_block_additional_residual
 
+        if get_mid_block_representations:
+            return sample
+        
         # 5. up
         for i, upsample_block in enumerate(self.up_blocks):
             is_final_block = i == len(self.up_blocks) - 1
