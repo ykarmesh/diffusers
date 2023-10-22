@@ -745,7 +745,7 @@ class UNet2DConditionModel(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin)
         mid_block_additional_residual: Optional[torch.Tensor] = None,
         encoder_attention_mask: Optional[torch.Tensor] = None,
         return_dict: bool = True,
-        get_mid_block_representations: bool = False,
+        get_block_representations: Optional[str] = None,
     ) -> Union[UNet2DConditionOutput, Tuple]:
         r"""
         The [`UNet2DConditionModel`] forward method.
@@ -946,8 +946,10 @@ class UNet2DConditionModel(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin)
         is_controlnet = mid_block_additional_residual is not None and down_block_additional_residuals is not None
         is_adapter = mid_block_additional_residual is None and down_block_additional_residuals is not None
 
+        block_representations = {}
+
         down_block_res_samples = (sample,)
-        for downsample_block in self.down_blocks:
+        for down_idx, downsample_block in enumerate(self.down_blocks):
             if hasattr(downsample_block, "has_cross_attention") and downsample_block.has_cross_attention:
                 # For t2i-adapter CrossAttnDownBlock2D
                 additional_residuals = {}
@@ -969,7 +971,14 @@ class UNet2DConditionModel(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin)
                 if is_adapter and len(down_block_additional_residuals) > 0:
                     sample += down_block_additional_residuals.pop(0)
 
+            if "down" in get_block_representations:
+                block_representations['down_' + str(down_idx)] = sample
+
             down_block_res_samples += res_samples
+        
+        # if get_block_representations only has 'down', return here
+        if "down" in get_block_representations and "mid" not in get_block_representations and "up" not in get_block_representations:
+            return block_representations
 
         if is_controlnet:
             new_down_block_res_samples = ()
@@ -999,12 +1008,15 @@ class UNet2DConditionModel(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin)
                 and sample.shape == down_block_additional_residuals[0].shape
             ):
                 sample += down_block_additional_residuals.pop(0)
+            
+            if "mid" in get_block_representations:
+                block_representations['mid'] = sample
 
         if is_controlnet:
             sample = sample + mid_block_additional_residual
 
-        if get_mid_block_representations:
-            return sample
+        if "mid" in get_block_representations and "up" not in get_block_representations:
+            return block_representations
         
         # 5. up
         for i, upsample_block in enumerate(self.up_blocks):
@@ -1038,6 +1050,12 @@ class UNet2DConditionModel(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin)
                     scale=lora_scale,
                 )
 
+            if "up" in get_block_representations:
+                block_representations['up_' + str(i)] = sample
+
+        if "up" in get_block_representations:
+            return block_representations
+        
         # 6. post-process
         if self.conv_norm_out:
             sample = self.conv_norm_out(sample)
